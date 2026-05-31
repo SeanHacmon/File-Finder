@@ -72,7 +72,6 @@ async def index_user_files(user_id: str, access_token: str):
             try:
                 file_id = file["id"]
                 file_name = file.get("name", "unknown")
-                file_size = file.get("size", 0)
                 extension = get_extension(file_name)
                 onedrive_url = file.get("webUrl", "")
                 file_path = get_file_path(file)
@@ -106,7 +105,7 @@ async def index_user_files(user_id: str, access_token: str):
                 print(f"[Indexer] Error indexing {file.get('name')}: {e}")
 
             finally:
-                # Update progress after each file regardless of success/failure
+                # Update progress after each file
                 done = i + 1
                 total = len(files_to_index)
                 indexing_progress[user_id] = {
@@ -126,32 +125,48 @@ async def index_user_files(user_id: str, access_token: str):
 
 async def fetch_all_files(access_token: str) -> list:
     """
-    Fetches all files from the user's OneDrive using Microsoft Graph API.
-    Handles pagination — Graph API returns max 200 items per page.
+    Fetches all files from the user's OneDrive recursively.
+    Walks through every folder using /children endpoint.
     """
     headers = {"Authorization": f"Bearer {access_token}"}
     files = []
-    # Start with root drive items, recursively get all files
-    url = "https://graph.microsoft.com/v1.0/me/drive/root/search(q='')?$select=id,name,size,webUrl,parentReference,file&$top=200"
 
-    async with httpx.AsyncClient() as client:
-        while url:
-            response = await client.get(url, headers=headers)
-            if response.status_code != 200:
-                print(f"[Indexer] Graph API error: {response.status_code} {response.text}")
-                break
+    async def fetch_folder(folder_url: str):
+        async with httpx.AsyncClient() as client:
+            while folder_url:
+                response = await client.get(folder_url, headers=headers)
+                if response.status_code != 200:
+                    print(f"[Indexer] Graph API error: {response.status_code} {response.text[:200]}")
+                    break
 
-            data = response.json()
-            items = data.get("value", [])
+                data = response.json()
+                items = data.get("value", [])
 
-            # Only keep actual files (not folders)
-            for item in items:
-                if "file" in item:
-                    files.append(item)
+                for item in items:
+                    if "file" in item:
+                        # It's a file — add it
+                        files.append(item)
+                    elif "folder" in item:
+                        # It's a folder — recurse into it
+                        folder_id = item["id"]
+                        child_url = (
+                            f"https://graph.microsoft.com/v1.0/me/drive/items/"
+                            f"{folder_id}/children"
+                            f"?$select=id,name,size,webUrl,parentReference,file,folder"
+                            f"&$top=200"
+                        )
+                        await fetch_folder(child_url)
 
-            # Handle pagination
-            url = data.get("@odata.nextLink", None)
+                # Handle pagination
+                folder_url = data.get("@odata.nextLink", None)
 
+    # Start from OneDrive root
+    root_url = (
+        "https://graph.microsoft.com/v1.0/me/drive/root/children"
+        "?$select=id,name,size,webUrl,parentReference,file,folder"
+        "&$top=200"
+    )
+    await fetch_folder(root_url)
     return files
 
 
