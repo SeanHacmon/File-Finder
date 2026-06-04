@@ -3,6 +3,7 @@ import httpx
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import RedirectResponse
 from dotenv import load_dotenv
+from urllib.parse import quote
 
 load_dotenv()
 
@@ -12,6 +13,7 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 TENANT_ID = os.getenv("TENANT_ID", "common")
 REDIRECT_URI = os.getenv("REDIRECT_URI", "http://localhost:8000/auth/callback")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = "openid profile email offline_access Files.Read Files.Read.All User.Read"
@@ -25,8 +27,10 @@ def login():
         f"&redirect_uri={REDIRECT_URI}"
         f"&scope={SCOPES.replace(' ', '%20')}"
         f"&response_mode=query"
+        f"&prompt=select_account"
     )
     return RedirectResponse(auth_url)
+
 
 @router.get("/auth/callback")
 async def auth_callback(request: Request, code: str = None, error: str = None):
@@ -58,7 +62,6 @@ async def auth_callback(request: Request, code: str = None, error: str = None):
 
     user = await get_user_profile(access_token)
 
-    # Personal accounts may not have "mail" — try multiple fields
     email = (
         user.get("mail")
         or user.get("userPrincipalName")
@@ -70,15 +73,28 @@ async def auth_callback(request: Request, code: str = None, error: str = None):
     if not user_id:
         raise HTTPException(status_code=400, detail="Could not get user ID from Microsoft")
 
+    user_name = user.get("displayName") or user.get("name") or "User"
+
+    # Store in session as backup
     request.session["access_token"] = access_token
     request.session["refresh_token"] = refresh_token or ""
     request.session["user_id"] = user_id
-    request.session["user_name"] = user.get("displayName") or user.get("name") or "User"
+    request.session["user_name"] = user_name
     request.session["user_email"] = email
 
     print(f"[Auth] User logged in: {email} (id: {user_id})")
 
-    return RedirectResponse("http://localhost:3000/search")
+    # Pass everything including access token to frontend via URL params
+    # Frontend stores in localStorage so it works across all account types
+    redirect_url = (
+        f"{FRONTEND_URL}/search"
+        f"?uid={quote(user_id)}"
+        f"&name={quote(user_name)}"
+        f"&email={quote(email)}"
+        f"&token={quote(access_token)}"
+    )
+    return RedirectResponse(redirect_url)
+
 
 @router.get("/auth/me")
 def get_me(request: Request):
@@ -91,10 +107,12 @@ def get_me(request: Request):
         "email": request.session.get("user_email"),
     }
 
+
 @router.post("/auth/logout")
 def logout(request: Request):
     request.session.clear()
     return {"status": "logged_out"}
+
 
 async def get_user_profile(access_token: str) -> dict:
     async with httpx.AsyncClient() as client:
@@ -106,19 +124,40 @@ async def get_user_profile(access_token: str) -> dict:
             }
         )
     print(f"[Auth] Graph /me status: {response.status_code}")
-    print(f"[Auth] Graph /me response: {response.text[:500]}")
-
     if response.status_code != 200:
         raise HTTPException(status_code=400, detail=f"Failed to fetch user profile: {response.text}")
     return response.json()
 
+
 def get_current_user(request: Request) -> dict:
+    """
+    Reads user from session OR from Authorization header.
+    This supports both cookie-based and token-based auth.
+    """
+    # Try session first
     user_id = request.session.get("user_id")
-    if not user_id:
+    access_token = request.session.get("access_token")
+
+    # Fall back to Authorization header
+    if not user_id or not access_token:
+        auth_header = request.headers.get("Authorization", "")
+        user_id_header = request.headers.get("X-User-Id", "")
+        user_name_header = request.headers.get("X-User-Name", "")
+        user_email_header = request.headers.get("X-User-Email", "")
+
+        if auth_header.startswith("Bearer ") and user_id_header:
+            return {
+                "id": user_id_header,
+                "name": user_name_header,
+                "email": user_email_header,
+                "access_token": auth_header.replace("Bearer ", ""),
+            }
+
         raise HTTPException(status_code=401, detail="Not authenticated. Please log in.")
+
     return {
         "id": user_id,
         "name": request.session.get("user_name"),
         "email": request.session.get("user_email"),
-        "access_token": request.session.get("access_token"),
+        "access_token": access_token,
     }
