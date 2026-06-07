@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 
-const API = "http://localhost:8000";
+const API = "https://file-finder-lp0y.onrender.com";
 
 interface SearchResult {
   id: string;
@@ -27,7 +27,6 @@ interface Progress {
   percent: number;
 }
 
-// Build axios headers from stored user
 function getHeaders(user: User) {
   return {
     Authorization: `Bearer ${user.token}`,
@@ -45,7 +44,6 @@ function SearchPage() {
   const [searched, setSearched] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
 
-  // Load user on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const uid = params.get("uid");
@@ -54,20 +52,13 @@ function SearchPage() {
     const token = params.get("token");
 
     if (uid && email && token) {
-      // Fresh login from Microsoft OAuth
-      const userData: User = {
-        id: uid,
-        name: name || "",
-        email: email || "",
-        token: token,
-      };
+      const userData: User = { id: uid, name: name || "", email: email || "", token };
       setUser(userData);
       localStorage.setItem("filefinder_user", JSON.stringify(userData));
       window.history.replaceState({}, "", "/search");
       return;
     }
 
-    // Returning user — check localStorage
     const stored = localStorage.getItem("filefinder_user");
     if (stored) {
       try {
@@ -78,22 +69,15 @@ function SearchPage() {
       }
     }
 
-    // No user found — redirect to login
     window.location.href = "/";
   }, []);
 
-  // Trigger indexing when user loads
   useEffect(() => {
     if (!user) return;
-    axios
-      .post(`${API}/index`, {}, {
-        withCredentials: true,
-        headers: getHeaders(user)
-      })
+    axios.post(`${API}/index`, {}, { withCredentials: true, headers: getHeaders(user) })
       .catch((err) => console.log("Index trigger:", err));
   }, [user]);
 
-  // Poll indexing progress
   useEffect(() => {
     if (!user) return;
     const interval = setInterval(async () => {
@@ -169,9 +153,7 @@ function SearchPage() {
         {user && (
           <div style={styles.headerRight}>
             <span style={styles.userEmail}>{user.email}</span>
-            <button style={styles.logoutBtn} onClick={handleLogout}>
-              Sign out
-            </button>
+            <button style={styles.logoutBtn} onClick={handleLogout}>Sign out</button>
           </div>
         )}
       </div>
@@ -187,22 +169,16 @@ function SearchPage() {
             <div style={styles.progressBarBg}>
               <div style={{ ...styles.progressBarFill, width: `${progress.percent}%` }} />
             </div>
-            <p style={styles.progressHint}>
-              You can search while indexing continues in the background
-            </p>
+            <p style={styles.progressHint}>You can search while indexing continues in the background</p>
           </div>
         )}
 
         {progress?.status === "complete" && !searched && (
-          <div style={styles.successBanner}>
-            ✅ All files indexed — search is ready!
-          </div>
+          <div style={styles.successBanner}>✅ All files indexed — search is ready!</div>
         )}
 
         <div style={styles.searchSection}>
-          {!searched && (
-            <h2 style={styles.searchTitle}>Search inside your files</h2>
-          )}
+          {!searched && <h2 style={styles.searchTitle}>Search inside your files</h2>}
           <div style={styles.searchBar}>
             <input
               style={styles.searchInput}
@@ -213,11 +189,7 @@ function SearchPage() {
               onKeyDown={handleKeyDown}
               autoFocus
             />
-            <button
-              style={styles.searchButton}
-              onClick={handleSearch}
-              disabled={loading}
-            >
+            <button style={styles.searchButton} onClick={handleSearch} disabled={loading}>
               {loading ? "..." : "Search"}
             </button>
           </div>
@@ -228,49 +200,28 @@ function SearchPage() {
             {results.length === 0 ? (
               <div style={styles.noResults}>
                 <p style={{ fontSize: 32 }}>🔍</p>
-                <p style={{ color: "#6b7280", fontSize: 16 }}>
-                  No files found for <strong>"{query}"</strong>
-                </p>
-                <p style={{ color: "#9ca3af", fontSize: 14 }}>
-                  Try different keywords or wait for indexing to complete
-                </p>
+                <p style={{ color: "#6b7280", fontSize: 16 }}>No files found for <strong>"{query}"</strong></p>
+                <p style={{ color: "#9ca3af", fontSize: 14 }}>Try different keywords or wait for indexing to complete</p>
               </div>
             ) : (
               <>
                 <p style={styles.resultCount}>
-                  {results.length} file{results.length !== 1 ? "s" : ""} found for{" "}
-                  <strong>"{query}"</strong>
+                  {results.length} file{results.length !== 1 ? "s" : ""} found for <strong>"{query}"</strong>
                 </p>
                 {results.map((result) => (
-                  <a
-                    key={result.id}
-                    href={result.onedrive_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={styles.resultCard}
-                  >
+                  <a key={result.id} href={result.onedrive_url} target="_blank" rel="noopener noreferrer" style={styles.resultCard}>
                     <div style={styles.resultHeader}>
-                      <span style={styles.fileIcon}>
-                        {getFileIcon(result.file_type)}
-                      </span>
+                      <span style={styles.fileIcon}>{getFileIcon(result.file_type)}</span>
                       <div style={styles.resultMeta}>
                         <span style={styles.fileName}>{result.name}</span>
                         <span style={styles.filePath}>{result.path}</span>
                       </div>
-                      <span style={styles.fileType}>
-                        {result.file_type.toUpperCase()}
-                      </span>
+                      <span style={styles.fileType}>{result.file_type.toUpperCase()}</span>
                     </div>
                     {result.snippet && (
-                      <p
-                        style={styles.snippet}
-                        dangerouslySetInnerHTML={{
-                          __html: result.snippet.replace(
-                            /\[([^\]]+)\]/g,
-                            '<mark style="background:#fef08a;padding:0 2px;border-radius:2px">$1</mark>'
-                          ),
-                        }}
-                      />
+                      <p style={styles.snippet} dangerouslySetInnerHTML={{
+                        __html: result.snippet.replace(/\[([^\]]+)\]/g, '<mark style="background:#fef08a;padding:0 2px;border-radius:2px">$1</mark>')
+                      }} />
                     )}
                   </a>
                 ))}
@@ -282,9 +233,7 @@ function SearchPage() {
         {!searched && (
           <div style={styles.emptyState}>
             <p>🔍 Type keywords to search inside your OneDrive files</p>
-            <p style={{ fontSize: 14, color: "#9ca3af" }}>
-              Searches inside .txt, .pdf, .docx, and .xlsx files
-            </p>
+            <p style={{ fontSize: 14, color: "#9ca3af" }}>Searches inside .txt, .pdf, .docx, and .xlsx files</p>
           </div>
         )}
       </div>
